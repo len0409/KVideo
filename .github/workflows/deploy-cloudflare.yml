@@ -15,7 +15,7 @@ jobs:
           ref: built-output
 
       - name: Deploy to Cloudflare
-        run: npx wrangler pages deploy . --project-name=kvideo --branch=main
+        run: npx wrangler@2 pages deploy . --project-name=kvideo --branch=main
         env:
           CLOUDFLARE_EMAIL: ${{ secrets.CF_EMAIL }}
           CLOUDFLARE_API_KEY: ${{ secrets.CF_API_KEY }}
