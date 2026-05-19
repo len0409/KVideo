@@ -10,13 +10,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: built-output
+
+      - name: Verify files
+        run: |
+          echo "=== Checking config.func.js ==="
+          grep -c "github" _worker.js/__next-on-pages-dist__/functions/api/config.func.js || echo "github NOT found"
+          echo "--- First 5 files ---"
+          ls | head -5
 
       - name: Deploy
         env:
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
         run: |
-          set -e
-          npx wrangler whoami
-          npx wrangler pages project list
           npx wrangler pages deploy . --project-name=kvideo --branch=main
