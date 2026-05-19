@@ -14,30 +14,78 @@ jobs:
         with:
           ref: built-output
 
-      - name: Deploy via Cloudflare API
+      - name: Deploy
         env:
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
-          CF_ACCOUNT_ID: fe3fd711e0dc7e7de5adcde70133fda1
+          CF_ACCOUNT: fe3fd711e0dc7e7de5adcde70133fda1
         run: |
           set -e
-          echo "Deploying to Cloudflare Pages..."
+          pip install -q requests
+          python3 << 'PYEOF'
+          import os, json, requests, zipfile, io, time
+
+          CF_EMAIL = os.environ["CF_EMAIL"]
+          CF_API_KEY = os.environ["CF_API_KEY"]
+          CF_ACCOUNT = os.environ["CF_ACCOUNT"]
+          PROJECT = "kvideo"
+          BRANCH = "built-output"
+
+          headers = {"X-Auth-Email": CF_EMAIL, "X-Auth-Key": CF_API_KEY}
+          base = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT}/pages/projects/{PROJECT}"
+
+          # Step 1: Create zip of all files
+          print("📦 Creating zip...")
+          buf = io.BytesIO()
+          with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+              for root, dirs, files in os.walk("."):
+                  for f in files:
+                      if ".git" in root:
+                          continue
+                      fp = os.path.join(root, f)
+                      zf.write(fp, fp[2:] if fp.startswith("./") else fp)
+          body = buf.getvalue()
+          print(f"   Zip size: {len(body)} bytes")
+
+          # Step 2: Get upload URL
+          print("🔗 Getting upload URL...")
+          r = requests.post(f"{base}/uploads", headers=headers, json={})
+          if not r.json().get("success"):
+              print(f"❌ Upload URL: {r.text}")
+              exit(1)
+          jit = r.json()["result"]["jit"]
+
+          # Step 3: Upload zip
+          print("📤 Uploading...")
+          r2 = requests.post(
+              f"https://workers.cloudflare.com/jit/{jit}/upload",
+              headers={"Content-Type": "application/octet-stream"},
+              data=body
+          )
+          if not r2.json().get("success"):
+              print(f"❌ Upload: {r2.text}")
+              exit(1)
+          upload_id = r2.json()["result"]["id"]
+          print(f"   Upload OK: {upload_id[:16]}")
+
+          # Step 4: Trigger deployment
+          print("🚀 Creating deployment...")
+          r3 = requests.post(
+              f"{base}/deployments",
+              headers=headers,
+              json={"branch": BRANCH}
+          )
+          if not r3.json().get("success"):
+              print(f"❌ Deploy: {r3.text}")
+              exit(1)
           
-          RESP=$(curl -s -X POST \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/pages/projects/kvideo/deployments" \
-            -H "X-Auth-Email: $CF_EMAIL" \
-            -H "X-Auth-Key: $CF_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{"branch":"main"}')
+          dep = r3.json()["result"]
+          print(f"✅ 部署已触发: {dep['id'][:12]}")
+          print(f"   URL: https://kvideo.pages.dev")
+          print(f"   等待30秒验证...")
           
-          echo "$RESP" | python3 -c "
-          import json,sys
-          r=json.load(sys.stdin)
-          if r.get('success'):
-              dep=r['result']
-              print(f\"✅ 部署成功: {dep['id'][:12]}\")
-              print(f\"   URL: https://kvideo.pages.dev\")
-          else:
-              print(f\"❌: {r.get('errors')}\")
-              sys.exit(1)
-          "
+          # Wait and verify
+          time.sleep(30)
+          r4 = requests.get(f"https://kvideo.pages.dev/", timeout=10)
+          print(f"   验证: HTTP {r4.status_code} size:{len(r4.text)}")
+          PYEOF
