@@ -16,47 +16,28 @@ jobs:
 
       - name: Deploy via Cloudflare API
         env:
-          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
           CF_ACCOUNT_ID: fe3fd711e0dc7e7de5adcde70133fda1
         run: |
           set -e
-          # 1. Get upload URL
-          UPLOAD_URL=$(curl -s -X POST \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/pages/projects/kvideo/uploads" \
-            -H "Authorization: Bearer $CF_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['upload_url'])")
-          echo "Upload URL: $UPLOAD_URL"
+          echo "Deploying to Cloudflare Pages..."
           
-          # 2. Create tar of all files
-          tar czf /tmp/site.tar.gz ./* .[!.]* 2>/dev/null
-          
-          # 3. Upload to CF
-          curl -s -X PUT "$UPLOAD_URL" --data-binary @/tmp/site.tar.gz \
-            -H "Content-Type: application/octet-stream" \
-            | python3 -c "
-          import json,sys
-          r=json.load(sys.stdin)
-          if r.get('success'):
-              print('Upload OK, id:', r['result']['id'])
-          else:
-              print('Upload failed:', r)
-              sys.exit(1)
-          "
-          
-          # 4. Trigger deployment
-          curl -s -X POST \
+          RESP=$(curl -s -X POST \
             "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/pages/projects/kvideo/deployments" \
-            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "X-Auth-Email: $CF_EMAIL" \
+            -H "X-Auth-Key: $CF_API_KEY" \
             -H "Content-Type: application/json" \
-            -d '{"branch":"main"}' \
-            | python3 -c "
+            -d '{"branch":"main"}')
+          
+          echo "$RESP" | python3 -c "
           import json,sys
           r=json.load(sys.stdin)
           if r.get('success'):
-              dep = r['result']
-              print(f\"Deploy: {dep['id'][:12]} -> {dep.get('url','?')}\")
+              dep=r['result']
+              print(f\"✅ 部署成功: {dep['id'][:12]}\")
+              print(f\"   URL: https://kvideo.pages.dev\")
           else:
-              print(f\"Error: {r.get('errors')}\")
+              print(f\"❌: {r.get('errors')}\")
               sys.exit(1)
           "
