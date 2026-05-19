@@ -14,8 +14,49 @@ jobs:
         with:
           ref: built-output
 
-      - name: Deploy
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          command: pages deploy . --project-name=kvideo --branch=main
+      - name: Deploy via Cloudflare API
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: fe3fd711e0dc7e7de5adcde70133fda1
+        run: |
+          set -e
+          # 1. Get upload URL
+          UPLOAD_URL=$(curl -s -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/pages/projects/kvideo/uploads" \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['upload_url'])")
+          echo "Upload URL: $UPLOAD_URL"
+          
+          # 2. Create tar of all files
+          tar czf /tmp/site.tar.gz ./* .[!.]* 2>/dev/null
+          
+          # 3. Upload to CF
+          curl -s -X PUT "$UPLOAD_URL" --data-binary @/tmp/site.tar.gz \
+            -H "Content-Type: application/octet-stream" \
+            | python3 -c "
+          import json,sys
+          r=json.load(sys.stdin)
+          if r.get('success'):
+              print('Upload OK, id:', r['result']['id'])
+          else:
+              print('Upload failed:', r)
+              sys.exit(1)
+          "
+          
+          # 4. Trigger deployment
+          curl -s -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/pages/projects/kvideo/deployments" \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"branch":"main"}' \
+            | python3 -c "
+          import json,sys
+          r=json.load(sys.stdin)
+          if r.get('success'):
+              dep = r['result']
+              print(f\"Deploy: {dep['id'][:12]} -> {dep.get('url','?')}\")
+          else:
+              print(f\"Error: {r.get('errors')}\")
+              sys.exit(1)
+          "
