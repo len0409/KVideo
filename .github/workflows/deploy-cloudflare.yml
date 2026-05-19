@@ -11,6 +11,10 @@ jobs:
     permissions:
       contents: read
       deployments: write
+    environment:
+      name: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - name: Checkout built files
         uses: actions/checkout@v4
