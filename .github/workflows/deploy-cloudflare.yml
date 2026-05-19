@@ -11,11 +11,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy
+      - name: Deploy to Cloudflare Pages
         env:
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          CF_ACCOUNT: fe3fd711e0dc7e7de5adcde70133fda1
         run: |
-          echo "Deploying to Cloudflare Pages..."
-          curl -sf "https://api.cloudflare.com/client/v4/user/tokens/verify"             -H "X-Auth-Email: $CF_EMAIL"             -H "X-Auth-Key: $CF_API_KEY"             | python3 -c "import json,sys;d=json.load(sys.stdin);print('Auth OK, user:', d['result']['id'])" || echo "Auth failed"
-          echo "DONE"
+          set -e
+          echo "=== Deploying KVideo ==="
+          
+          # Create ZIP
+          zip -r /tmp/site.zip . -x ".git/*" "*.md"
+          echo "ZIP size: $(stat -c%s /tmp/site.zip) bytes"
+          
+          # Get upload URL
+          RESP=$(curl -sf -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects/kvideo/deployments" \
+            -H "X-Auth-Email: $CF_EMAIL" \
+            -H "X-Auth-Key: $CF_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"branch":"main"}')
+          
+          echo "$RESP" | python3 -c "
+          import json,sys
+          r=json.load(sys.stdin)
+          if r.get('success'):
+              d=r['result']
+              print(f\"Deployment created: {d['id'][:12]}\")
+              env=d.get('environment','?')
+              print(f\"Environment: {env}\")
+          else:
+              print(f\"Error: {r.get('errors')}\")
+              sys.exit(1)
+          "
+          
+          echo "=== Done ==="
+          echo "Site: https://kvideo.pages.dev"
